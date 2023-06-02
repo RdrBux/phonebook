@@ -27,6 +27,7 @@ let data = [
 
 const app = express();
 app.use(cors());
+app.use(express.static('build'));
 app.use(express.json());
 // Logger
 morgan.token('data', (req) => JSON.stringify(req.body));
