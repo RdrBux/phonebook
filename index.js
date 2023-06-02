@@ -9,7 +9,7 @@ const Person = require('./models/person');
 mongoose.set('strictQuery', false);
 mongoose
   .connect(process.env.MONGODB_URI)
-  .then((result) => {
+  .then(() => {
     console.log('connected to MongoDB');
   })
   .catch((error) => {
@@ -55,23 +55,27 @@ app.delete('/persons/:id', async (req, res, next) => {
   }
 });
 
-app.post('/persons', async (req, res) => {
-  const person = req.body;
+app.post('/persons', async (req, res, next) => {
+  try {
+    const person = req.body;
 
-  if (!person.name || !person.number) {
-    return res.status(400).send('Content missing');
+    if (!person.name || !person.number) {
+      return res.status(400).send('Content missing');
+    }
+
+    const people = await Person.find().exec();
+
+    if (people.some((pers) => pers.name === person.name)) {
+      return res.status(400).send('A person already exists with that name');
+    }
+
+    const newPerson = new Person(person);
+    await newPerson.save();
+
+    res.json(newPerson);
+  } catch (err) {
+    next(err);
   }
-
-  const people = await Person.find().exec();
-
-  if (people.some((pers) => pers.name === person.name)) {
-    return res.status(400).send('A person already exists with that name');
-  }
-
-  const newPerson = new Person(person);
-  await newPerson.save();
-
-  res.json(newPerson);
 });
 
 app.put('/persons/:id', async (req, res, next) => {
@@ -79,6 +83,8 @@ app.put('/persons/:id', async (req, res, next) => {
     const person = req.body;
     const updateNote = await Person.findByIdAndUpdate(req.params.id, person, {
       new: true,
+      runValidators: true,
+      context: 'query',
     });
     res.json(updateNote);
   } catch (err) {
@@ -104,6 +110,9 @@ const errorHandler = (error, req, res, next) => {
 
   if (error.name === 'CastError') {
     return res.status(400).send({ error: 'malformatted id' });
+  }
+  if (error.name === 'ValidationError') {
+    return res.status(400).send({ error: error.message });
   }
 
   res.status(404).send('unknown error');
