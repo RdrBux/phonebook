@@ -1,29 +1,20 @@
+require('dotenv').config();
 const express = require('express');
 const morgan = require('morgan');
 const cors = require('cors');
+const mongoose = require('mongoose');
 
-let data = [
-  {
-    id: 1,
-    name: 'Arto Hellas',
-    number: '040-123456',
-  },
-  {
-    id: 2,
-    name: 'Ada Lovelace',
-    number: '39-44-5323523',
-  },
-  {
-    id: 3,
-    name: 'Dan Abramov',
-    number: '12-43-234345',
-  },
-  {
-    id: 4,
-    name: 'Mary Poppendieck',
-    number: '39-23-6423122',
-  },
-];
+const Person = require('./models/person');
+
+mongoose.set('strictQuery', false);
+mongoose
+  .connect(process.env.MONGODB_URI)
+  .then((result) => {
+    console.log('connected to MongoDB');
+  })
+  .catch((error) => {
+    console.log('error connecting to MongoDB:', error.message);
+  });
 
 const app = express();
 app.use(cors());
@@ -35,50 +26,92 @@ app.use(
   morgan(':method :url :status :res[content-length] - :response-time ms :data')
 );
 
-// Rouyes
-app.get('/persons', (req, res) => {
-  res.json(data);
+// Routes
+app.get('/persons', async (req, res) => {
+  const people = await Person.find().exec();
+
+  res.json(people);
 });
 
-app.get('/persons/:id', (req, res) => {
-  const id = Number(req.params.id);
-  const personData = data.find((person) => person.id === id);
+app.get('/persons/:id', async (req, res, next) => {
+  try {
+    const personData = await Person.findById(req.params.id).exec();
 
-  if (!personData) {
-    res.status(404).send('Sorry, person not found.');
+    if (!personData) {
+      res.status(404).send('Sorry, person not found.');
+    }
+    res.json(personData);
+  } catch (err) {
+    next(err);
   }
-  res.json(personData);
 });
 
-app.delete('/persons/:id', (req, res) => {
-  const id = Number(req.params.id);
-  data = data.filter((person) => person.id !== id);
-  res.status(204).end();
+app.delete('/persons/:id', async (req, res, next) => {
+  try {
+    await Person.findByIdAndRemove(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
 });
 
-app.post('/persons', (req, res) => {
+app.post('/persons', async (req, res) => {
   const person = req.body;
 
   if (!person.name || !person.number) {
     return res.status(400).send('Content missing');
   }
 
-  if (data.some((pers) => pers.name === person.name)) {
+  const people = await Person.find().exec();
+
+  if (people.some((pers) => pers.name === person.name)) {
     return res.status(400).send('A person already exists with that name');
   }
 
-  const id = Math.ceil(Math.random() * 1000000);
-  person.id = id;
-  data.push(person);
+  const newPerson = new Person(person);
+  await newPerson.save();
 
-  res.json(person);
+  res.json(newPerson);
 });
 
-app.get('/info', (req, res) => {
-  res.send(
-    `<p>Phonebook has info for ${data.length} people</p><p>${new Date()}</p>`
-  );
+app.put('/persons/:id', async (req, res, next) => {
+  try {
+    const person = req.body;
+    const updateNote = await Person.findByIdAndUpdate(req.params.id, person, {
+      new: true,
+    });
+    res.json(updateNote);
+  } catch (err) {
+    next(err);
+  }
 });
 
-const PORT = process.env.PORT || 3001;
+app.get('/info', async (req, res, next) => {
+  try {
+    const people = await Person.find().exec();
+    res.send(
+      `<p>Phonebook has info for ${
+        people.length
+      } people</p><p>${new Date()}</p>`
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+const errorHandler = (error, req, res, next) => {
+  console.error(error.message);
+
+  if (error.name === 'CastError') {
+    return res.status(400).send({ error: 'malformatted id' });
+  }
+
+  res.status(404).send('unknown error');
+  next(error);
+};
+
+// this has to be the last loaded middleware.
+app.use(errorHandler);
+
+const PORT = process.env.PORT;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
